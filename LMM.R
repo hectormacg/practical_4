@@ -1,5 +1,5 @@
 library(nlme);library(lme4)
-
+library(debug)
 
 LMMsetup <- function(form, dat, ref = list()) {
   # Construct fixed effects model matrix (X) from formula and data
@@ -14,30 +14,20 @@ LMMsetup <- function(form, dat, ref = list()) {
   
   return(list(X = X, Z=Z,y=y))
 }
-dim(result$Z)
-qrZ<-qr(result$Z)
-dim(qr.R(qrZ))
-LMMprof<-function(X, Z, y){
-          qrZ<-qr(Z)
-  
+solve_chol <- function(L, b) {
+  return (backsolve(L, forwardsolve(t(L),b)))
 }
 result<-LMMsetup(score ~ Machine,Machines,list("Worker",c("Worker","Machine")))
-dim(resul$Z)
-unique(Machines$Worker)
+# Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
+theta_init <- rep(0, length(list("Worker",c("Worker","Machine"))) + 1)  # Starting with a small positive value
 
 LMMprof <- function(theta, setup) {
+  # browser()
   X <- setup$X
   Z <- setup$Z
   y <- setup$y
   
-  # Extract sigma and random effects variances from theta
-  sigma <- exp(theta[1])#I think we don't need to expone
-  psi_diag <- exp(2 * theta[-1])
-  
-  # Construct the covariance matrix Psi_b for the random effects
-  Psi_b <- diag(psi_diag, ncol(Z), ncol(Z))
-  
-  # QR Decomposition of Z
+    # QR Decomposition of Z
   qr_decomp <- qr(Z)
   Q <- qr.Q(qr_decomp, complete = TRUE)
   R <- qr.R(qr_decomp)
@@ -46,61 +36,73 @@ LMMprof <- function(theta, setup) {
   n <- length(y)
   p <- ncol(Z)
   
-  # Subset R to match dimensions of Psi_b
-  R_subset <- R[1:p, ]  # Ensure R has compatible dimensions with Psi_b
+  # Extract sigma and random effects variances from theta
+  sigma <- exp(theta[1])#I think we don't need to expone
+  psi_diag <- exp(2 * theta[-1])
+  # browser()
+  # Construct the covariance matrix Psi_b for the random effects
+  Psi_b <- diag(psi_diag, ncol(Z), ncol(Z))
+  small_block<-R%*%Psi_b%*%t(R)+diag(1, nrow = p, ncol = p)*(sigma^2)
+  # Cholesky decomposition
+  small_block_chol <- chol(small_block)
   
-  # Calculate small_block with regularization
-  regularization <- 1e-6  # Small positive value to ensure positive definiteness
-  small_block <- R_subset %*% Psi_b %*% t(R_subset) + sigma^2 * diag(p) + regularization * diag(p)
+  small_block_Inv<-solve_chol(small_block_chol, diag(x = 1, nrow = p, ncol = p))
+  I_n_p <- diag(n - p)/(sigma^(2))
   
-  # # Check eigenvalues of small_block for positive definiteness
-  # eigenvalues <- eigen(small_block, symmetric = TRUE, only.values = TRUE)$values
-  # print("Current theta values:")
-  # print(theta)
-  # print("Eigenvalues of small_block:")
-  # print(sort(eigenvalues))
-   
-  # If positive definite, proceed with Cholesky inversion
-  small_block_inv <- chol2inv(chol(small_block))
-  
-  # Construct the full block matrix
-  block_matrix <- rbind(
-    cbind(small_block_inv, matrix(0, p, n - p)),
-    cbind(matrix(0, n - p, p), diag(1 / sigma^2, n - p))
+  # Construct the full W matrix
+  W_middle <- rbind(
+    cbind(small_block_Inv, matrix(0, nrow = p, ncol = n - p)),
+    cbind(matrix(0, nrow = n - p, ncol = p), I_n_p)
   )
   
   # Calculate W using Q and the block matrix
-  W <- Q %*% block_matrix %*% t(Q)
   
+  # W3 <- qr.qy(qr_decomp, t(qr.qy(qr_decomp, t(W_middle))))
+  # W2<-Q %*% W_middle %*% t(Q)
   # Compute log likelihood terms
-  beta_hat <- solve(t(X) %*% W %*% X, t(X) %*% W %*% y)
+  XWX<-t(X)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, X)
+  XWy<-t(X)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, y)
+  XWX_chol <- chol(XWX)
+  beta_hat<-solve_chol(L=XWX_chol, b=XWy)
   residual <- y - X %*% beta_hat
-  log_likelihood <- -0.5 * (t(residual) %*% W %*% residual + sum(log(diag(chol(small_block)))) + (n - p) * log(sigma^2))
+  minus_log_likelihood<- 0.5*t(residual)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, residual)+sum(log(diag(small_block_Inv)))+ ((n - p) * log(sigma^2)/2)
+  # log_likelihood <- -0.5 * (t(residual) %*% W %*% residual + sum(log(diag(chol(small_block)))) + (n - p) * log(sigma^2))
   
-  print("Log-likelihood:")
-  print(log_likelihood)
-  
-  return(-log_likelihood)  # Return negative log-likelihood for minimization
+  print("minus_Log-likelihood:")
+  print(minus_log_likelihood)
+  attr(minus_log_likelihood, "beta_hat") <- beta_hat
+  return(minus_log_likelihood)  # Return negative log-likelihood for minimization
 }
+mtrace(LMMprof, FALSE)
+mtrace(lmm)
+
+
+x<-LMMprof(theta = theta_init, setup = result)
+attr(x, 'beta_hat')
+
 lmm <- function(form, dat, ref = list()) {
   # Step 1: Setup model matrices and data
   setup <- LMMsetup(form, dat, ref)
   
   # Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
   theta_init <- rep(0, length(ref) + 1)  # Starting with a small positive value
+  lower_bounds <- rep(log(.001)/2, length(ref) + 1)  # Example: ensuring all theta > -2
+  upper_bounds <- rep(Inf, length(ref) + 1)  # No upper bounds, or set specifically if needed
   
   # Step 3: Optimize negative log-likelihood using `optim`
-  opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
+  # opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
+  opt <- optim(theta_init, LMMprof, setup = setup, lower = lower_bounds,
+               upper = upper_bounds, method = "L-BFGS-B", control = list())
   
   # Extract optimal theta and compute beta estimate
   theta_opt <- opt$par
   sigma_opt <- exp(theta_opt[1])
   psi_diag_opt <- exp(2 * theta_opt[-1])
   
-  # Recompute beta estimate using optimized theta
-  #fix this one hac
-  W <- chol2inv(chol(qr.R(qr(setup$Z)) %*% diag(psi_diag_opt, ncol(setup$Z), ncol(setup$Z)) %*% t(qr.R(qr(setup$Z))) + sigma_opt^2 * diag(length(setup$y))))
-  beta_hat <- solve(t(setup$X) %*% W %*% setup$X, t(setup$X) %*% W %*% setup$y)
+  # # Recompute beta estimate using optimized theta
+  # #fix this one hac
+  # W <- chol2inv(chol(qr.R(qr(setup$Z)) %*% diag(psi_diag_opt, ncol(setup$Z), ncol(setup$Z)) %*% t(qr.R(qr(setup$Z))) + sigma_opt^2 * diag(length(setup$y))))
+  # beta_hat <- solve(t(setup$X) %*% W %*% setup$X, t(setup$X) %*% W %*% setup$y)
   
   return(list(beta = beta_hat, theta = theta_opt))
 }

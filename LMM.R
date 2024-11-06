@@ -14,4 +14,15 @@ LMMsetup <- function(form, dat, ref = list()) {
   
   return(list(X = X, Z=Z,y=y))
 }
-LMMsetup(score ~ Machine,Machines,list("Worker",c("Worker","Machine")))
+dim(result$Z)
+qrZ<-qr(result$Z)
+dim(qr.R(qrZ))
+LMMprof<-function(X, Z, y){
+          qrZ<-qr(Z)
+  
+}
+result<-LMMsetup(score ~ Machine,Machines,list("Worker",c("Worker","Machine")))
+dim(resul$Z)
+unique(Machines$Worker)
+unique(Machines$Machine)
+colnames(resul$Z)

@@ -1,37 +1,43 @@
-library(nlme);library(lme4)
+# Load necessary libraries
 library(debug)
-
+library(nlme)
+library(lme4)
+library(MASS)
 LMMsetup <- function(form, dat, ref = list()) {
   # Construct fixed effects model matrix (X) from formula and data
   X <- model.matrix(form, dat)
   
   # Construct random effects model matrix (Z)
-  Z_list <- lapply(ref, function(vars) model.matrix(as.formula(paste("~", paste(vars, collapse = ":"), "-1")), dat))
+  # Z_list <- lapply(ref, function(vars) model.matrix(as.formula(paste("~", paste(vars, collapse = ":"), "-1")), dat))
+  Z_list <- lapply(ref, function(vars) {
+    # Create the model matrix
+    model_mat <- model.matrix(as.formula(paste("~", paste(vars, collapse = ":"), "-1")), dat)
+    
+    # Get the dimensions of the matrix
+    attr(model_mat, "columns") <- dim(model_mat)[2]
+    return(model_mat)
+  })
+  
   Z <- do.call(cbind, Z_list)
+  dimensions<-lapply(Z_list, function(Z) attr(Z, "columns"))
   
   # Response variable
   y <- model.response(model.frame(form, dat))
   
-  return(list(X = X, Z=Z,y=y))
+  return(list(X = X, Z=Z,y=y, dimensions=dimensions))
 }
+setup <- LMMsetup(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
 solve_chol <- function(L, b) {
   return (backsolve(L, forwardsolve(t(L),b)))
 }
-result<-LMMsetup(score ~ Machine,Machines,list("Worker",c("Worker","Machine")))
-# Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
-theta_init <- rep(0, length(list("Worker",c("Worker","Machine"))) + 1)  # Starting with a small positive value
-
 LMMprof <- function(theta, setup) {
   # browser()
   X <- setup$X
   Z <- setup$Z
   y <- setup$y
-  
-    # QR Decomposition of Z
-  qr_decomp <- qr(Z)
-  Q <- qr.Q(qr_decomp, complete = TRUE)
-  R <- qr.R(qr_decomp)
-  
+  Z_cols<-setup$dimensions
+  qr_decomp<-setup$qr_decomp
+  R<-setup$R
   # Dimensions
   n <- length(y)
   p <- ncol(Z)
@@ -41,7 +47,7 @@ LMMprof <- function(theta, setup) {
   psi_diag <- exp(2 * theta[-1])
   # browser()
   # Construct the covariance matrix Psi_b for the random effects
-  Psi_b <- diag(psi_diag, ncol(Z), ncol(Z))
+  Psi_b <- diag(rep(psi_diag, Z_cols), ncol(Z), ncol(Z))
   small_block<-R%*%Psi_b%*%t(R)+diag(1, nrow = p, ncol = p)*(sigma^2)
   # Cholesky decomposition
   small_block_chol <- chol(small_block)
@@ -73,49 +79,38 @@ LMMprof <- function(theta, setup) {
   attr(minus_log_likelihood, "beta_hat") <- beta_hat
   return(minus_log_likelihood)  # Return negative log-likelihood for minimization
 }
-mtrace(LMMprof, FALSE)
-mtrace(lmm)
-
-
-x<-LMMprof(theta = theta_init, setup = result)
-attr(x, 'beta_hat')
 
 lmm <- function(form, dat, ref = list()) {
+  
   # Step 1: Setup model matrices and data
   setup <- LMMsetup(form, dat, ref)
+  # QR Decomposition of Z
+  setup$qr_decomp <- qr(setup$Z)
+  setup$R <- qr.R(setup$qr_decomp)
   
   # Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
   theta_init <- rep(0, length(ref) + 1)  # Starting with a small positive value
-  lower_bounds <- rep(log(.001)/2, length(ref) + 1)  # Example: ensuring all theta > -2
-  upper_bounds <- rep(Inf, length(ref) + 1)  # No upper bounds, or set specifically if needed
-  
+  lower_bounds <- rep(log(0.001), length(ref) + 1)  # Example: ensuring all theta > -2
+  upper_bounds <- rep(log(100), length(ref) + 1)  # No upper bounds, or set specifically if needed
   # Step 3: Optimize negative log-likelihood using `optim`
   # opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
   opt <- optim(theta_init, LMMprof, setup = setup, lower = lower_bounds,
                upper = upper_bounds, method = "L-BFGS-B", control = list())
+  final_cost_value <- LMMprof(theta = opt$par, setup = setup)
   
-  # Extract optimal theta and compute beta estimate
-  theta_opt <- opt$par
-  sigma_opt <- exp(theta_opt[1])
-  psi_diag_opt <- exp(2 * theta_opt[-1])
+  # Accessing the attribute "beta"
+  beta_hat <- attr(final_cost_value, "beta")
   
-  # # Recompute beta estimate using optimized theta
-  # #fix this one hac
-  # W <- chol2inv(chol(qr.R(qr(setup$Z)) %*% diag(psi_diag_opt, ncol(setup$Z), ncol(setup$Z)) %*% t(qr.R(qr(setup$Z))) + sigma_opt^2 * diag(length(setup$y))))
-  # beta_hat <- solve(t(setup$X) %*% W %*% setup$X, t(setup$X) %*% W %*% setup$y)
   
-  return(list(beta = beta_hat, theta = theta_opt))
+  return(list(beta = beta_hat, theta = opt$par))
 }
+# mtrace(lmm, FALSE)
+# mtrace(LMMprof, FALSE)
 
-
-# Load necessary libraries
-library(nlme)
-library(lme4)
-library(MASS)
 # Load the Machines dataset and use `lmm` function
 data("Machines", package = "nlme")
 result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
-
+result$beta
 # Compare to lme4 results
 lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
 summary(lmer_model)

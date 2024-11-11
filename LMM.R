@@ -48,7 +48,7 @@ LMMprof <- function(theta, setup) {
   # browser()
   # Construct the covariance matrix Psi_b for the random effects
   Psi_b <- diag(rep(psi_diag, Z_cols), ncol(Z), ncol(Z))
-  small_block<-R%*%Psi_b%*%t(R)+diag(1, nrow = p, ncol = p)*(sigma^2)
+  small_block<-(R%*%Psi_b%*%t(R))+(diag(1, nrow = p, ncol = p)*(sigma^2))
   # Cholesky decomposition
   small_block_chol <- chol(small_block)
   
@@ -70,8 +70,8 @@ LMMprof <- function(theta, setup) {
   XWy<-t(X)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, y)
   XWX_chol <- chol(XWX)
   beta_hat<-solve_chol(L=XWX_chol, b=XWy)
-  residual <- y - X %*% beta_hat
-  minus_log_likelihood<- 0.5*t(residual)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, residual)+sum(log(diag(small_block_Inv)))+ ((n - p) * log(sigma^2)/2)
+  residual <- y - (X%*%beta_hat)
+  minus_log_likelihood<- 0.5*(t(residual)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, residual)+2*sum(log(diag(small_block_chol)))+ ((n - p) * log(sigma^2)))
   # log_likelihood <- -0.5 * (t(residual) %*% W %*% residual + sum(log(diag(chol(small_block)))) + (n - p) * log(sigma^2))
   
   print("minus_Log-likelihood:")
@@ -79,7 +79,6 @@ LMMprof <- function(theta, setup) {
   attr(minus_log_likelihood, "beta_hat") <- beta_hat
   return(minus_log_likelihood)  # Return negative log-likelihood for minimization
 }
-
 lmm <- function(form, dat, ref = list()) {
   
   # Step 1: Setup model matrices and data
@@ -89,88 +88,33 @@ lmm <- function(form, dat, ref = list()) {
   setup$R <- qr.R(setup$qr_decomp)
   
   # Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
+  # theta_init<-rnorm(length(ref) + 1)
   theta_init <- rep(0, length(ref) + 1)  # Starting with a small positive value
-  lower_bounds <- rep(log(0.001), length(ref) + 1)  # Example: ensuring all theta > -2
-  upper_bounds <- rep(log(100), length(ref) + 1)  # No upper bounds, or set specifically if needed
+  # lower_bounds <- rep(-Inf, length(ref) + 1)  # Example: ensuring all theta > -2
+  # upper_bounds <- rep(Inf, length(ref) + 1)  # No upper bounds, or set specifically if needed
   # Step 3: Optimize negative log-likelihood using `optim`
-  # opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
-  opt <- optim(theta_init, LMMprof, setup = setup, lower = lower_bounds,
-               upper = upper_bounds, method = "L-BFGS-B", control = list())
+  opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
+  # opt <- optim(theta_init, LMMprof, setup = setup, lower = lower_bounds,
+  #              upper = upper_bounds, method = "L-BFGS-B", control = list())
   final_cost_value <- LMMprof(theta = opt$par, setup = setup)
   
   # Accessing the attribute "beta"
-  beta_hat <- attr(final_cost_value, "beta")
+  beta_hat <- attr(final_cost_value, "beta_hat")
   
   
   return(list(beta = beta_hat, theta = opt$par))
 }
 # mtrace(lmm, FALSE)
 # mtrace(LMMprof, FALSE)
-
 # Load the Machines dataset and use `lmm` function
 data("Machines", package = "nlme")
 result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
-result$beta
+print(exp(result$theta))
+print(result$beta)
+
 # Compare to lme4 results
 lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
 summary(lmer_model)
-print(result)
 
 
 
-#.............................
-# 𝑍
-# Z:
-#   
-#   Suppose 
-# 𝑍
-# Z has dimensions 
-# 𝑛
-# ×
-# 𝑝
-# n×p, where:
-#   𝑛
-# n is the number of observations (rows).
-# 𝑝
-# p is the number of random effects (columns).
-# So, 
-# 𝑍
-# Z is an 
-# 𝑛
-# ×
-# 𝑝
-# n×p matrix.
-# Ψ
-# 𝜃
-# Ψ 
-# θ
-# 
-# :
-#   
-#   Ψ
-# 𝜃
-# Ψ 
-# θ
-# 
-# is a diagonal matrix representing the variances of the random effects.
-# It has dimensions 
-# 𝑝
-# ×
-# 𝑝
-# p×p, where:
-#   𝑝
-# p is the number of random effects.
-# Ψ
-# 𝜃
-# Ψ 
-# θ
-# 
-# typically contains the variance parameters associated with each random effect along its diagonal.
-
-# This final 
-# 𝑛
-# ×
-# 𝑛
-# n×n matrix is used as 
-# 𝑊
-# W, 

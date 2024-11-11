@@ -61,16 +61,13 @@ LMMprof <- function(theta, setup) {
   )
   
   # Calculate W using Q and the block matrix
-  
-  # W3 <- qr.qy(qr_decomp, t(qr.qy(qr_decomp, t(W_middle))))
-  # W2<-Q %*% W_middle %*% t(Q)
-  # Compute log likelihood terms
-  XWX<-t(X)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, X)
-  XWy<-t(X)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, y)
+  Q_W_middle<-qr.qy(qr_decomp, W_middle)
+  XWX<-t(X)%*%Q_W_middle%*%qr.qty(qr_decomp, X)
+  XWy<-t(X)%*%Q_W_middle%*%qr.qty(qr_decomp, y)
   XWX_chol <- chol(XWX)
   beta_hat<-solve_chol(L=XWX_chol, b=XWy)
   residual <- y - (X%*%beta_hat)
-  minus_log_likelihood<- 0.5*(t(residual)%*%qr.qy(qr_decomp, W_middle)%*%qr.qty(qr_decomp, residual)+2*sum(log(diag(small_block_chol)))+ ((n - p) * log(sigma^2)))
+  minus_log_likelihood<- 0.5*(t(residual)%*%Q_W_middle%*%qr.qty(qr_decomp, residual)+2*sum(log(diag(small_block_chol)))+ ((n - p) * log(sigma^2)))
   # log_likelihood <- -0.5 * (t(residual) %*% W %*% residual + sum(log(diag(chol(small_block)))) + (n - p) * log(sigma^2))
   
   print("minus_Log-likelihood:")

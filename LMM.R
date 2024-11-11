@@ -26,7 +26,6 @@ LMMsetup <- function(form, dat, ref = list()) {
   
   return(list(X = X, Z=Z,y=y, dimensions=dimensions))
 }
-setup <- LMMsetup(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
 solve_chol <- function(L, b) {
   return (backsolve(L, forwardsolve(t(L),b)))
 }

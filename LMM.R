@@ -26,7 +26,6 @@ LMMsetup <- function(form, dat, ref = list()) {
   
   return(list(X = X, Z=Z,y=y, dimensions=dimensions))
 }
-result<-LMMsetup(score ~ Machine, dat = Machines, ref = list())
 solve_chol <- function(L, b) {
   return (backsolve(L, forwardsolve(t(L),b)))
 }
@@ -44,10 +43,10 @@ LMMprof <- function(theta, setup) {
     beta_hat<-backsolve(R, qr.qty(qr_decomp, y)[1:p])
     residual <- y - (X %*% beta_hat)
     # Minus log-likelihood calculation
-    minus_log_likelihood <- 0.5 * ((t(residual)%*%residual/sigma^2)+(sigma^(2*n)))
+    minus_log_likelihood <- 0.5 * ((t(residual)%*%residual/sigma^2)+log(sigma^(2*n)))
     
-    print("minus_Log-likelihood:")
-    print(minus_log_likelihood)
+    # print("minus_Log-likelihood:")
+    # print(minus_log_likelihood)
     attr(minus_log_likelihood, "beta_hat") <- beta_hat
     return(minus_log_likelihood)
     
@@ -114,8 +113,8 @@ LMMprof <- function(theta, setup) {
     # Minus log-likelihood calculation
     minus_log_likelihood <- 0.5 * (t(residual)%*%qr.qy(qr_decomp, W_res) + 2*sum(log(diag(small_block_chol))) + (n - p) * log(sigma^2))
     
-    print("minus_Log-likelihood:")
-    print(minus_log_likelihood)
+    # print("minus_Log-likelihood:")
+    # print(minus_log_likelihood)
     attr(minus_log_likelihood, "beta_hat") <- beta_hat
     return(minus_log_likelihood)
   }
@@ -156,12 +155,18 @@ lmm <- function(form, dat, ref = list()) {
 }
 # Load the Machines dataset and use `lmm` function
 data("Machines", package = "nlme")
-# result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
-result <- lmm(score ~ Machine, dat = Machines, ref = list())
+result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
 # Compare to lme4 results
-# lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
+lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
+summary(lmer_model)
+print(exp(result$theta))
+print(result$beta)
+
+#compare to lm results
+result <- lmm(score ~ Machine, dat = Machines, ref = list())
 lm_model<-lm(score ~ Machine, data = Machines)
-# lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
+predictions <- predict(lm_model, Machines)
+sqrt(sum((Machines$score-predictions)^2)/dim(Machines)[1])
 summary(lm_model)
 print(exp(result$theta))
 print(result$beta)

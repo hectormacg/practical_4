@@ -27,128 +27,98 @@ LMMsetup <- function(form, dat, ref = list()) {
   return(list(X = X, Z=Z,y=y, dimensions=dimensions))
 }
 result<-LMMsetup(score ~ Machine, dat = Machines, ref = list())
-
 solve_chol <- function(L, b) {
   return (backsolve(L, forwardsolve(t(L),b)))
-}
-LMMprof_1 <- function(theta, setup) {
-  # browser()
-  X <- setup$X
-  Z <- setup$Z
-  y <- setup$y
-  Z_cols<-setup$dimensions
-  qr_decomp<-setup$qr_decomp
-  R<-setup$R
-  # Dimensions
-  n <- length(y)
-  p <- ncol(Z)
-  
-  # Extract sigma and random effects variances from theta
-  sigma <- exp(theta[1])#I think we don't need to expone
-  psi_diag <- exp(2 * theta[-1])
-  # browser()
-  # Construct the covariance matrix Psi_b for the random effects
-  Psi_b <- diag(rep(psi_diag, Z_cols), ncol(Z), ncol(Z))
-  small_block<-(R%*%Psi_b%*%t(R))+(diag(1, nrow = p, ncol = p)*(sigma^2))
-  # Cholesky decomposition
-  small_block_chol <- chol(small_block)
-  
-  small_block_Inv<-solve_chol(small_block_chol, diag(x = 1, nrow = p, ncol = p))
-  I_n_p <- diag(n - p)/(sigma^(2))
-  
-  # Construct the full W matrix
-  W_middle <- rbind(
-    cbind(small_block_Inv, matrix(0, nrow = p, ncol = n - p)),
-    cbind(matrix(0, nrow = n - p, ncol = p), I_n_p)
-  )
-  
-  # Calculate W using Q and the block matrix
-  Q_W_middle<-qr.qy(qr_decomp, W_middle)
-  XWX<-t(X)%*%Q_W_middle%*%qr.qty(qr_decomp, X)
-  XWy<-t(X)%*%Q_W_middle%*%qr.qty(qr_decomp, y)
-  XWX_chol <- chol(XWX)
-  beta_hat<-solve_chol(L=XWX_chol, b=XWy)
-  residual <- y - (X%*%beta_hat)
-  minus_log_likelihood<- 0.5*(t(residual)%*%Q_W_middle%*%qr.qty(qr_decomp, residual)+2*sum(log(diag(small_block_chol)))+ ((n - p) * log(sigma^2)))
-  # log_likelihood <- -0.5 * (t(residual) %*% W %*% residual + sum(log(diag(chol(small_block)))) + (n - p) * log(sigma^2))
-  
-  print("minus_Log-likelihood:")
-  print(minus_log_likelihood)
-  attr(minus_log_likelihood, "beta_hat") <- beta_hat
-  return(minus_log_likelihood)  # Return negative log-likelihood for minimization
 }
 LMMprof <- function(theta, setup) {
   # browser()
   X <- setup$X
   Z <- setup$Z
   y <- setup$y
-  Z_cols<-setup$dimensions
   qr_decomp<-setup$qr_decomp
   R<-setup$R
-  # Dimensions
-  n <- length(y)
-  p <- ncol(Z)
-  
-  # Extract sigma and random effects variances from theta
-  sigma <- exp(theta[1])#I think we don't need to expone
-  psi_diag <- exp(2 * theta[-1])
-  # browser()
-  # Construct the covariance matrix Psi_b for the random effects
-  Psi_b <- diag(rep(psi_diag, Z_cols), ncol(Z), ncol(Z))
-  small_block<-R%*%Psi_b%*%t(R)+diag(1, nrow = p, ncol = p)*(sigma^2)
-  # Cholesky decomposition
-  small_block_chol <- chol(small_block)
-  
-  small_block_Inv<-solve_chol(small_block_chol, diag(x = 1, nrow = p, ncol = p))
-  # Step 1: Compute Q^T y and split it into two parts
-  QTy <- qr.qty(qr_decomp, y) # Compute Q^T y
-  QTy_1 <- QTy[1:p]           # First p rows
-  QTy_2 <- QTy[(p + 1):n]     # Remaining (n - p) rows
-  
-  # Step 2: Compute W * y without forming W
-  Wy_1 <- small_block_Inv%*%QTy_1 # Apply small block inverse to QTy_1
-  Wy_2 <- QTy_2/sigma^(2)                     # Scale QTy_2 by 1/sigma^2
-  WQTy <- c(Wy_1, Wy_2)                         # Combine to form Wy
-  
-  # Step 3: Compute X^T W X and X^T W y without splitting Q^T X
-  QTX <- qr.qty(qr_decomp, X)  # Compute Q^T X without splitting
-  
-  # Apply the weights to QTX
-  WX_1 <- small_block_Inv %*% QTX[1:p, , drop = FALSE]  # Apply the small block inverse to the first p rows
-  WX_2 <- QTX[(p + 1):n, , drop = FALSE]/sigma^(2)              # Scale the remaining rows by 1 / sigma^2
-  WQTX <- rbind(WX_1, WX_2)                                          # Combine weighted parts without further splitting
-  
-  # Compute X^T W X
-  XWX <- t(X) %*% qr.qy(qr_decomp, WQTX)           
-  
-  # Compute X^T W y
-  XWy<-t(X) %*% qr.qy(qr_decomp, WQTy)
-  XWX_chol <- chol(XWX)
-  beta_hat<-solve_chol(L=XWX_chol, b=XWy)
-  residual <- y - (X %*% beta_hat)
-  
-  # Step 4: Estimate beta using the Cholesky decomposition of X^T W X
-  XWX_chol <- chol(XWX)
-  beta_hat <- solve_chol(XWX_chol, XWy)
-  
-  # Compute residuals and negative log-likelihood
-  residual <- y - X %*% beta_hat
-  QTy_res <- qr.qty(qr_decomp, residual)
-  QTy_res_1 <- QTy_res[1:p]
-  QTy_res_2 <- QTy_res[(p + 1):n]
-  
-  #W_res_1 <- solve_chol(small_block_chol, QTy_res_1)
-  W_res_1 <- small_block_Inv %*% QTy_res_1
-  W_res_2 <- QTy_res_2 / sigma^2
-  W_res <- c(W_res_1, W_res_2)
-  
-  # Minus log-likelihood calculation
-  minus_log_likelihood <- 0.5 * (t(residual)%*%qr.qy(qr_decomp, W_res) + 2*sum(log(diag(small_block_chol))) + (n - p) * log(sigma^2))
-  
-  print("minus_Log-likelihood:")
-  print(minus_log_likelihood)
-  attr(minus_log_likelihood, "beta_hat") <- beta_hat
-  return(minus_log_likelihood)
+  if(is.null(Z)){
+    sigma <- exp(theta[1])
+    n <- length(y)
+    p<-ncol(R)
+    beta_hat<-backsolve(R, qr.qty(qr_decomp, y)[1:p])
+    residual <- y - (X %*% beta_hat)
+    # Minus log-likelihood calculation
+    minus_log_likelihood <- 0.5 * ((t(residual)%*%residual/sigma^2)+(sigma^(2*n)))
+    
+    print("minus_Log-likelihood:")
+    print(minus_log_likelihood)
+    attr(minus_log_likelihood, "beta_hat") <- beta_hat
+    return(minus_log_likelihood)
+    
+    
+  }else{
+    Z_cols<-setup$dimensions
+    # Dimensions
+    n <- length(y)
+    p <- ncol(Z)
+    
+    # Extract sigma and random effects variances from theta
+    sigma <- exp(theta[1])#I think we don't need to expone
+    psi_diag <- exp(2 * theta[-1])
+    # browser()
+    # Construct the covariance matrix Psi_b for the random effects
+    Psi_b <- diag(rep(psi_diag, Z_cols), ncol(Z), ncol(Z))
+    small_block<-R%*%Psi_b%*%t(R)+diag(1, nrow = p, ncol = p)*(sigma^2)
+    # Cholesky decomposition
+    small_block_chol <- chol(small_block)
+    
+    small_block_Inv<-solve_chol(small_block_chol, diag(x = 1, nrow = p, ncol = p))
+    # Step 1: Compute Q^T y and split it into two parts
+    QTy <- qr.qty(qr_decomp, y) # Compute Q^T y
+    QTy_1 <- QTy[1:p]           # First p rows
+    QTy_2 <- QTy[(p + 1):n]     # Remaining (n - p) rows
+    
+    # Step 2: Compute W * y without forming W
+    Wy_1 <- small_block_Inv%*%QTy_1 # Apply small block inverse to QTy_1
+    Wy_2 <- QTy_2/sigma^(2)                     # Scale QTy_2 by 1/sigma^2
+    WQTy <- c(Wy_1, Wy_2)                         # Combine to form Wy
+    
+    # Step 3: Compute X^T W X and X^T W y without splitting Q^T X
+    QTX <- qr.qty(qr_decomp, X)  # Compute Q^T X without splitting
+    
+    # Apply the weights to QTX
+    WX_1 <- small_block_Inv %*% QTX[1:p, , drop = FALSE]  # Apply the small block inverse to the first p rows
+    WX_2 <- QTX[(p + 1):n, , drop = FALSE]/sigma^(2)              # Scale the remaining rows by 1 / sigma^2
+    WQTX <- rbind(WX_1, WX_2)                                          # Combine weighted parts without further splitting
+    
+    # Compute X^T W X
+    XWX <- t(X) %*% qr.qy(qr_decomp, WQTX)           
+    
+    # Compute X^T W y
+    XWy<-t(X) %*% qr.qy(qr_decomp, WQTy)
+    XWX_chol <- chol(XWX)
+    beta_hat<-solve_chol(L=XWX_chol, b=XWy)
+    residual <- y - (X %*% beta_hat)
+    
+    # Step 4: Estimate beta using the Cholesky decomposition of X^T W X
+    XWX_chol <- chol(XWX)
+    beta_hat <- solve_chol(XWX_chol, XWy)
+    
+    # Compute residuals and negative log-likelihood
+    residual <- y - (X %*% beta_hat)
+    QTy_res <- qr.qty(qr_decomp, residual)
+    QTy_res_1 <- QTy_res[1:p]
+    QTy_res_2 <- QTy_res[(p + 1):n]
+    
+    #W_res_1 <- solve_chol(small_block_chol, QTy_res_1)
+    W_res_1 <- small_block_Inv %*% QTy_res_1
+    W_res_2 <- QTy_res_2 / sigma^2
+    W_res <- c(W_res_1, W_res_2)
+    
+    # Minus log-likelihood calculation
+    minus_log_likelihood <- 0.5 * (t(residual)%*%qr.qy(qr_decomp, W_res) + 2*sum(log(diag(small_block_chol))) + (n - p) * log(sigma^2))
+    
+    print("minus_Log-likelihood:")
+    print(minus_log_likelihood)
+    attr(minus_log_likelihood, "beta_hat") <- beta_hat
+    return(minus_log_likelihood)
+  }
 }
 # “Nelder-Mead”, “BFGS”, “CG”, “L-BFGS-B”, “SANN”,“Brent
 lmm <- function(form, dat, ref = list()) {
@@ -156,8 +126,16 @@ lmm <- function(form, dat, ref = list()) {
   # Step 1: Setup model matrices and data
   setup <- LMMsetup(form, dat, ref)
   # QR Decomposition of Z
-  setup$qr_decomp <- qr(setup$Z)
-  setup$R <- qr.R(setup$qr_decomp)
+  if(is.null(setup$Z)){
+    setup$qr_decomp <- qr(setup$X)
+    setup$R <- qr.R(setup$qr_decomp)
+    
+       
+  }else{
+    setup$qr_decomp <- qr(setup$Z)
+    setup$R <- qr.R(setup$qr_decomp)
+  }
+  
   
   # Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
   # theta_init<-rnorm(length(ref) + 1)
@@ -176,16 +154,15 @@ lmm <- function(form, dat, ref = list()) {
   
   return(list(beta = beta_hat, theta = opt$par))
 }
-# mtrace(lmm, FALSE)
-# mtrace(LMMprof, FALSE)
 # Load the Machines dataset and use `lmm` function
 data("Machines", package = "nlme")
-result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
-
-
+# result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
+result <- lmm(score ~ Machine, dat = Machines, ref = list())
 # Compare to lme4 results
-lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
-summary(lmer_model)
+# lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
+lm_model<-lm(score ~ Machine, data = Machines)
+# lmer_model <- lmer(score ~ Machine + (1|Worker) + (1|Worker:Machine), data = Machines, REML = FALSE)
+summary(lm_model)
 print(exp(result$theta))
 print(result$beta)
 

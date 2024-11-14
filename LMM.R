@@ -11,7 +11,7 @@
 # 2- Formulating the likelihood function with respect to theta and finding the Betas this is done in the LMMprof function.
 # 3- Using Cholesky decomposition for matrix computations, this is done in the solve_chol function. 
 # 4- Iteratively optimizing the log-likelihood to obtain parameter estimates this is done in the lmm function.
-# We used the default optimization method "Nelder-Mead" for higher dimensional cases but "Brent" for a single dimensional optimization.
+# We used the default optimization method "Nelder-Mead" for higher dimensional cases but "Brent" for a single dimensional optimization as suggested by R.
 
 
 LMMsetup <- function(form, dat, ref = list()) {
@@ -236,17 +236,15 @@ lmm <- function(form, dat, ref = list()) {
   if(is.null(setup$Z)){
     setup$qr_decomp <- qr(setup$X)
     setup$R <- qr.R(setup$qr_decomp)
-    neg_log_likelihood <- function(theta) {
-      LMMprof(theta = c(theta), setup = setup) # Pass the single theta value
-    }
-    
     # Optimize theta using "Brent" method
     opt <- optim(theta_init, LMMprof, setup = setup, method = "Brent", lower = -10, upper = 10, control = list(fnscale = 1))
     
     
   }
   # If there are random effects then apply the QR decomposition to Z
-  else{ 
+  else{
+    # Check if there are more columns than rows
+    if (ncol(setup$Z)>nrow(setup$Z)) warning("There are more columns than rows")
     setup$qr_decomp <- qr(setup$Z)
     setup$R <- qr.R(setup$qr_decomp)
     # Optimize negative log-likelihood using `optim`
@@ -259,4 +257,3 @@ lmm <- function(form, dat, ref = list()) {
   beta_hat <- attr(final_cost_value, "beta_hat")
   return(list(beta = beta_hat, theta = opt$par))
 }
-

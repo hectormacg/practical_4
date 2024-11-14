@@ -119,7 +119,6 @@ LMMprof <- function(theta, setup) {
     return(minus_log_likelihood)
   }
 }
-# “Nelder-Mead”, “BFGS”, “CG”, “L-BFGS-B”, “SANN”,“Brent
 lmm <- function(form, dat, ref = list()) {
   
   # Step 1: Setup model matrices and data
@@ -137,22 +136,19 @@ lmm <- function(form, dat, ref = list()) {
   
   
   # Step 2: Initial guesses for theta: log(sigma) and log standard deviations for random effects
-  # theta_init<-rnorm(length(ref) + 1)
-  theta_init <- rep(0, length(ref) + 1)  # Starting with a small positive value
-  # lower_bounds <- rep(-Inf, length(ref) + 1)  # Example: ensuring all theta > -2
-  # upper_bounds <- rep(Inf, length(ref) + 1)  # No upper bounds, or set specifically if needed
-  # Step 3: Optimize negative log-likelihood using `optim`
-  opt <- optim(theta_init, LMMprof, setup = setup, method = "L-BFGS-B", control = list(fnscale = 1))
-  # opt <- optim(theta_init, LMMprof, setup = setup, lower = lower_bounds,
-  #              upper = upper_bounds, method = "L-BFGS-B", control = list())
-  final_cost_value <- LMMprof(theta = opt$par, setup = setup)
   
+  theta_init <- rep(0, length(ref) + 1)  # Starting with a small positive value
+  # Step 3: Optimize negative log-likelihood using `optim`
+  # method = # “Nelder-Mead”, “BFGS”, “CG”, “L-BFGS-B”, “SANN”,“Brent
+  opt <- optim(theta_init, LMMprof, setup = setup, method = 'L-BFGS-B')
+  final_cost_value <- LMMprof(theta = opt$par, setup = setup)
   # Accessing the attribute "beta"
   beta_hat <- attr(final_cost_value, "beta_hat")
   
   
   return(list(beta = beta_hat, theta = opt$par))
 }
+
 # Load the Machines dataset and use `lmm` function
 data("Machines", package = "nlme")
 result <- lmm(score ~ Machine, dat = Machines, ref = list("Worker", c("Worker", "Machine")))
@@ -171,4 +167,38 @@ summary(lm_model)
 print(exp(result$theta))
 print(result$beta)
 
+#compare to lm results with more features
+result <- lmm(score ~ Machine+Worker, dat = Machines, ref = list())
+lm_model<-lm(score ~ Machine+Worker, data = Machines)
+predictions <- predict(lm_model, Machines)
+sqrt(sum((Machines$score-predictions)^2)/dim(Machines)[1])
+summary(lm_model)
+print(exp(result$theta))
+print(result$beta)
+
+library(MASS)
+data("Rubber", package = "MASS")
+result <- lmm(loss~hard + tens, dat = Rubber, ref = list())
+lm_model<-lm(loss~hard + tens, data = Rubber)
+predictions <- predict(lm_model, Rubber)
+sqrt(sum((Rubber$loss-predictions)^2)/dim(Rubber)[1])
+summary(lm_model)
+print(exp(result$theta))
+print(result$beta)
+
+
+library(MASS)
+data("Rubber", package = "MASS")
+lmer_model <- lmer(loss ~ hard + (1|tens) + (1|tens:hard), data = Rubber, REML = FALSE)
+summary(lmer_model)
+result <- lmm(loss~hard + tens, dat = Rubber, ref = list('tens', c('tens', 'hard')))
+print(exp(result$theta))
+print(result$beta)
+
+data("InstEval", package = "lme4")
+result <- lmm(y ~ service, dat = InstEval, ref = list("lectage"))
+lmer_model <- lmer(y ~ service + (1|lectage), data = InstEval, REML = FALSE)
+summary(lmer_model)
+print(exp(result$theta))
+print(result$beta)
 

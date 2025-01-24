@@ -1,4 +1,3 @@
-# Moayad Almohanna (s2647405), Sayantan Bal (s2692364), Hector Avila (s2682021)
 # We all sat together on the project during non-class hours and worked through 
 # all the tasks pushing and pulling the code on Github, so the work was roughly evenly divided among all 3
 
